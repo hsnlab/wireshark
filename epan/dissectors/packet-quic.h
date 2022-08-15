@@ -18,6 +18,7 @@
 extern "C" {
 #endif /* __cplusplus */
 
+
 /**
  * Metadata for a STREAM frame.
  * https://tools.ietf.org/html/draft-ietf-quic-transport-23#section-19.8
@@ -92,6 +93,12 @@ quic_get_stream_id_le(guint streamid, guint sub_stream_id, guint *sub_stream_id_
 WS_DLL_PUBLIC gboolean
 quic_get_stream_id_ge(guint streamid, guint sub_stream_id, guint *sub_stream_id_out);
 
+
+/**
+ * Retrieves the initial client DCID from the packet info, if available
+ */
+WS_DLL_PUBLIC gboolean
+quic_conn_data_get_conn_client_dcid_initial(struct _packet_info *pinfo, quic_cid_t *dcid);
 
 #ifdef __cplusplus
 }

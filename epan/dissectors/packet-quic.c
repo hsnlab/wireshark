@@ -66,6 +66,8 @@
 #include <epan/follow.h>
 #include <epan/addr_resolv.h>
 
+#define QUIC_DISSECTOR_DEBUG_TREE_ITEMS 1
+
 /* Prototypes */
 void proto_reg_handoff_quic(void);
 void proto_register_quic(void);
@@ -1422,7 +1424,7 @@ again:
         // TODO show expert info for retransmission? Additional checks may be
         // necessary here to tell a retransmission apart from other (normal?)
         // conditions. See also similar code in packet-tcp.c.
-#if 0
+#if QUIC_DISSECTOR_DEBUG_TREE_ITEMS
         proto_tree_add_debug_text(tree, "TODO retransmission expert info frame %d stream_id=%" PRIu64 " offset=%d visited=%d reassembly_id=0x%08x",
                 pinfo->num, stream->stream_id, offset, PINFO_FD_VISITED(pinfo), reassembly_id);
 #endif
@@ -3498,7 +3500,7 @@ quic_add_connection_info(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, qu
 
     pi = proto_tree_add_uint(ctree, hf_quic_connection_number, tvb, 0, 0, conn->number);
     proto_item_set_generated(pi);
-#if 0
+#if QUIC_DISSECTOR_DEBUG_TREE_ITEMS
     proto_tree_add_debug_text(ctree, "Client CID: %s", cid_to_string(&conn->client_cids.data));
     proto_tree_add_debug_text(ctree, "Server CID: %s", cid_to_string(&conn->server_cids.data));
     // Note: for Retry, this value has been cleared before.
@@ -4122,7 +4124,7 @@ dissect_quic(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
         quic_connection_create_or_update(&conn, pinfo, long_packet_type, version, &scid, &dcid, from_server);
         dgram_info->conn = conn;
         dgram_info->from_server = from_server;
-#if 0
+#if QUIC_DISSECTOR_DEBUG_TREE_ITEMS
         proto_tree_add_debug_text(quic_tree, "Connection: %d %p DCID=%s SCID=%s from_server:%d", pinfo->num, dgram_info->conn, cid_to_string(&dcid), cid_to_string(&scid), dgram_info->from_server);
     } else {
         proto_tree_add_debug_text(quic_tree, "Connection: %d %p from_server:%d", pinfo->num, dgram_info->conn, dgram_info->from_server);
@@ -5281,6 +5283,24 @@ proto_reg_handoff_quic(void)
     quic_follow_tap = register_tap("quic_follow");
 }
 
+gboolean
+quic_conn_data_get_conn_client_dcid_initial(struct _packet_info *pinfo, quic_cid_t *dcid)
+{
+    if (pinfo == NULL || dcid == NULL) {
+        return false;
+    }
+
+    quic_info_data_t * conn = quic_connection_from_conv(pinfo);
+    if (conn == NULL) {
+        return false;
+    }
+
+    dcid->len = conn->client_dcid_initial.len;
+    memset(dcid->cid, 0, QUIC_MAX_CID_LENGTH);
+    memcpy(dcid->cid, conn->client_dcid_initial.cid, dcid->len);
+
+    return true;
+}
 /*
  * Editor modelines  -  https://www.wireshark.org/tools/modelines.html
  *
