@@ -942,7 +942,7 @@ http3_initailize_qpack_stream_context(quic_stream_info *stream_info, http3_strea
 #endif /* HAVE_NGHTTP3 */
 
 static http3_session_info_t*
-http3_session_new() {
+http3_session_new(void) {
     http3_session_info_t* h3session;
 
     h3session = wmem_new0(wmem_file_scope(), http3_session_info_t);
@@ -1170,7 +1170,7 @@ dissect_http3_headers(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, guint
                 proto_item_set_generated(ti);
                 ti = proto_tree_add_uint(blocked_rcint_tree, hf_http3_header_qpack_blocked_decoder_wicnt, tvb, offset, 0, (guint32)wicnt);
 
-                HTTP3_DISSECTOR_DPRINTF("Early return nread=%d blocked=%hhu ricnt=%llu wicnt=%llu", nread, flags, ricnt, wicnt);
+                HTTP3_DISSECTOR_DPRINTF("Early return nread=%d blocked=%hhu ricnt=%lu wicnt=%lu", nread, flags, ricnt, wicnt);
                 break;
             }
 
@@ -1672,7 +1672,7 @@ dissect_http3_qpack_encoder_stream_opcodes(tvbuff_t *tvb, packet_info *pinfo, pr
             DISSECTOR_ASSERT(decoded + inc <= remaining);
             decoded += inc;
             value_offset = offset + decoded;
-            HTTP3_DISSECTOR_DPRINTF("fin=%d Decoded=%u value_bytes_len=%llu remaining=%u",
+            HTTP3_DISSECTOR_DPRINTF("fin=%d Decoded=%u value_bytes_len=%lu remaining=%u",
                 fin, decoded, value_bytes_len, remaining);
             DISSECTOR_ASSERT(decoded + value_bytes_len <= remaining);
             decoded += value_bytes_len;
@@ -1682,10 +1682,10 @@ dissect_http3_qpack_encoder_stream_opcodes(tvbuff_t *tvb, packet_info *pinfo, pr
             qpack_opcode = proto_tree_add_item(tree, hf_http3_qpack_encoder_opcode_insert_indexed, tvb, opcode_offset, opcode_length, ENC_NA);
             qpack_opcode_tree = proto_item_add_subtree(qpack_opcode, ett_http3_qpack_opcode);
             ti = proto_tree_add_item(qpack_opcode_tree, hf_http3_qpack_encoder_opcode_insert_indexed_ref, tvb, opcode_offset, table_entry_len, ENC_NA);
-            proto_item_set_text(qpack_opcode, "QPACK encoder opcode: INSERT_INDEXED ref_len=%d ref=%llu val_len=%d",
+            proto_item_set_text(qpack_opcode, "QPACK encoder opcode: INSERT_INDEXED ref_len=%d ref=%lu val_len=%d",
                 table_entry_len, table_entry, value_len);
 
-            HTTP3_DISSECTOR_DPRINTF("fin=%d Opcode=%u:INSERT INDEXED ref_len=%d ref=%llu value_len=%d val=[huffman]",
+            HTTP3_DISSECTOR_DPRINTF("fin=%d Opcode=%u:INSERT INDEXED ref_len=%d ref=%lu value_len=%d val=[huffman]",
                 fin, opcode, table_entry_len, table_entry, value_len);
         } else if (opcode & 0x40) {
             guint64 name_bytes_len = 0;
@@ -1700,7 +1700,7 @@ dissect_http3_qpack_encoder_stream_opcodes(tvbuff_t *tvb, packet_info *pinfo, pr
             DISSECTOR_ASSERT(decoded + inc <= remaining);
             decoded += inc;
             name_offset = offset + decoded;
-            HTTP3_DISSECTOR_DPRINTF("fin=%d Decoded=%u name_bytes_len=%llu remaining=%u",
+            HTTP3_DISSECTOR_DPRINTF("fin=%d Decoded=%u name_bytes_len=%lu remaining=%u",
                 fin, decoded, name_bytes_len, remaining);
             DISSECTOR_ASSERT(decoded + name_bytes_len <= remaining);
             decoded += name_bytes_len;
@@ -1712,7 +1712,7 @@ dissect_http3_qpack_encoder_stream_opcodes(tvbuff_t *tvb, packet_info *pinfo, pr
             DISSECTOR_ASSERT(decoded + inc <= remaining);
             decoded += inc;
             value_offset = offset + decoded;
-            HTTP3_DISSECTOR_DPRINTF("fin=%d Decoded=%u value_bytes_len=%llu remaining=%u",
+            HTTP3_DISSECTOR_DPRINTF("fin=%d Decoded=%u value_bytes_len=%lu remaining=%u",
                 fin, decoded, value_bytes_len, remaining);
             DISSECTOR_ASSERT(decoded + value_bytes_len <= remaining);
             decoded += value_bytes_len;
@@ -1738,8 +1738,8 @@ dissect_http3_qpack_encoder_stream_opcodes(tvbuff_t *tvb, packet_info *pinfo, pr
             decoded += inc;
             opcode_length = offset + decoded - opcode_offset;
             qpack_opcode = proto_tree_add_item(tree, hf_http3_qpack_encoder_opcode_dtable_cap, tvb, opcode_offset, opcode_length, ENC_NA);
-            proto_item_set_text(qpack_opcode, "QPACK encoder opcode: Set DTable Cap=%llu", dynamic_capacity);
-            HTTP3_DISSECTOR_DPRINTF("Fin=%d Opcode=%u: SET DTABLE TABLE CAP capacity=%llu",
+            proto_item_set_text(qpack_opcode, "QPACK encoder opcode: Set DTable Cap=%lu", dynamic_capacity);
+            HTTP3_DISSECTOR_DPRINTF("Fin=%d Opcode=%u: SET DTABLE TABLE CAP capacity=%lu",
                 fin, opcode, dynamic_capacity);
         } else if (!(opcode & 0x20)) {
             guint64 duplicate_of = 0;
@@ -1754,7 +1754,7 @@ dissect_http3_qpack_encoder_stream_opcodes(tvbuff_t *tvb, packet_info *pinfo, pr
             opcode_length = offset + decoded - opcode_offset;
             qpack_opcode = proto_tree_add_item(tree, hf_http3_qpack_encoder_opcode_duplicate, tvb, opcode_offset, opcode_length, ENC_NA);
 
-            HTTP3_DISSECTOR_DPRINTF("Fin=%d Opcode=%u: DUPLICATE of=%llu",
+            HTTP3_DISSECTOR_DPRINTF("Fin=%d Opcode=%u: DUPLICATE of=%lu",
                 fin, opcode, duplicate_of);
         } else {
             HTTP3_DISSECTOR_DPRINTF("Opcode=%hhu: UNKNOWN", opcode);
