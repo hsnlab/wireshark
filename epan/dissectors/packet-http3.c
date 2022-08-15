@@ -41,8 +41,13 @@ static int hf_http3_settings_qpack_max_table_capacity = -1;
 static int hf_http3_settings_max_field_section_size = -1;
 static int hf_http3_settings_qpack_blocked_streams = -1;
 static int hf_http3_settings_extended_connect = -1;
+static int hf_http3_settings_enable_webtransport = -1;
+static int hf_http3_settings_h3_datagram = -1;
 static int hf_http3_priority_update_element_id = -1;
 static int hf_http3_priority_update_field_value = -1;
+static int hf_http3_wt_stream_id = -1;
+static int hf_http3_wt_stream_body = -1;
+
 
 static expert_field ei_http3_unknown_stream_type = EI_INIT;
 
@@ -87,6 +92,9 @@ static const val64_string http3_stream_types[] = {
 #define HTTP3_PUSH_PROMISE                      0x5
 #define HTTP3_GOAWAY                            0x7
 #define HTTP3_MAX_PUSH_ID                       0xD
+#define HTTP3_WEBTRANSPORT_STREAM               0x41
+#define HTTP3_UNIDIRECTIONAL_STREAM             0x51
+
 #define HTTP3_PRIORITY_UPDATE_REQUEST_STREAM    0xF0700
 #define HTTP3_PRIORITY_UPDATE_PUSH_STREAM       0xF0701
 
@@ -103,6 +111,8 @@ static const val64_string http3_frame_types[] = {
     { 0x08, "Reserved" },
     { 0x09, "Reserved" },
     { HTTP3_MAX_PUSH_ID, "MAX_PUSH_ID" },
+    { HTTP3_WEBTRANSPORT_STREAM, "WEBTRANSPORT_STREAM" }, // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-03#section-4.2
+    { HTTP3_UNIDIRECTIONAL_STREAM, "UNIDIRECTIONAL_STREAM" },
     { 0x0e, "Reserved" }, // "DUPLICATE_PUSH" in draft-26 and before
     { HTTP3_PRIORITY_UPDATE_REQUEST_STREAM, "PRIORITY_UPDATE" }, // draft-ietf-httpbis-priority-03
     { HTTP3_PRIORITY_UPDATE_PUSH_STREAM, "PRIORITY_UPDATE" }, // draft-ietf-httpbis-priority-03
@@ -119,12 +129,16 @@ static const val64_string http3_frame_types[] = {
 #define HTTP3_SETTINGS_MAX_FIELD_SECTION_SIZE   0x06
 #define HTTP3_QPACK_BLOCKED_STREAMS             0x07
 #define HTTP3_EXTENDED_CONNECT                  0x08 /* https://datatracker.ietf.org/doc/draft-ietf-httpbis-h3-websockets */
+#define HTTP3_ENABLE_WEBTRANSPORT               0x2b603742 /* https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-03#section-8.2 */
+#define HTTP3_H3_DATAGRAM                       0xffd277 /* https://www.ietf.org/archive/id/draft-ietf-masque-h3-datagram-08.html#section-5.1 */
 
 static const val64_string http3_settings_vals[] = {
     { HTTP3_QPACK_MAX_TABLE_CAPACITY, "Max Table Capacity" },
     { HTTP3_SETTINGS_MAX_FIELD_SECTION_SIZE, "Max Field Section Size" },
     { HTTP3_QPACK_BLOCKED_STREAMS, "Blocked Streams" },
-    { HTTP3_QPACK_BLOCKED_STREAMS, "Extended CONNECT" },
+    { HTTP3_EXTENDED_CONNECT, "Extended CONNECT" },
+    { HTTP3_ENABLE_WEBTRANSPORT, "Enable webtransport" },
+    { HTTP3_H3_DATAGRAM, "H3 Datagram" },
     { 0, NULL }
 };
 
@@ -241,6 +255,14 @@ dissect_http3_settings(tvbuff_t* tvb, packet_info* pinfo _U_, proto_tree* http3_
                 proto_tree_add_item_ret_varint(settings_tree, hf_http3_settings_extended_connect, tvb, offset, -1, ENC_VARINT_QUIC, &value, &lenvar);
                 proto_item_append_text(ti_settings, ": %" PRIu64, value );
             break;
+            case HTTP3_ENABLE_WEBTRANSPORT:
+                proto_tree_add_item_ret_varint(settings_tree, hf_http3_settings_enable_webtransport, tvb, offset, -1, ENC_VARINT_QUIC, &value, &lenvar);
+                proto_item_append_text(ti_settings, ": %" PRIu64, value );
+            break;
+            case HTTP3_H3_DATAGRAM:
+                proto_tree_add_item_ret_varint(settings_tree, hf_http3_settings_h3_datagram, tvb, offset, -1, ENC_VARINT_QUIC, &value, &lenvar);
+                proto_item_append_text(ti_settings, ": %" PRIu64, value );
+            break;
             default:
                 /* No Default */
             break;
@@ -267,6 +289,20 @@ dissect_http3_priority_update(tvbuff_t* tvb, packet_info* pinfo _U_, proto_tree*
     return offset;
 }
 
+/* Webtransport stream (uni-, bidirectional) */
+static int
+dissect_http3_webtransport_stream(tvbuff_t* tvb, packet_info* pinfo _U_, proto_tree* http3_tree, guint offset, guint64 frame_length)
+{
+    guint64 session_body_len;
+    session_body_len = frame_length;
+
+    proto_tree_add_item(http3_tree, hf_http3_wt_stream_body, tvb, offset, (int)session_body_len, ENC_ASCII);
+    offset += (int)session_body_len;
+
+    return offset;
+}
+
+
 static int
 dissect_http3_frame(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, int offset)
 {
@@ -282,8 +318,14 @@ dissect_http3_frame(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, int off
         col_append_sep_str(pinfo->cinfo, COL_INFO, ", ", val64_to_str_const(frame_type, http3_frame_types, "Unknown"));
     }
 
-    proto_tree_add_item_ret_varint(tree, hf_http3_frame_length, tvb, offset, -1, ENC_VARINT_QUIC, &frame_length, &lenvar);
-    offset += lenvar;
+    if (frame_type == HTTP3_WEBTRANSPORT_STREAM ||
+        frame_type == HTTP3_UNIDIRECTIONAL_STREAM) {
+        frame_length = tvb_reported_length_remaining(tvb, offset);
+        //proto_item_set_text(pi, "WT_Framelength: (%#" PRIx64 ")", frame_length);
+    } else {
+        proto_tree_add_item_ret_varint(tree, hf_http3_frame_length, tvb, offset, -1, ENC_VARINT_QUIC, &frame_length, &lenvar);
+        offset += lenvar;
+    }
 
     if (frame_length) {
         proto_tree_add_item(tree, hf_http3_frame_payload, tvb, offset, (int)frame_length, ENC_NA);
@@ -298,6 +340,12 @@ dissect_http3_frame(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, int off
             case HTTP3_PRIORITY_UPDATE_PUSH_STREAM: { /* Priority_Update Frame */
                 tvbuff_t *next_tvb = tvb_new_subset_length(tvb, offset, (int)frame_length);
                 dissect_http3_priority_update(next_tvb, pinfo,tree, 0, frame_length);
+            }
+            break;
+            case HTTP3_UNIDIRECTIONAL_STREAM:
+            case HTTP3_WEBTRANSPORT_STREAM: {
+                tvbuff_t *next_tvb = tvb_new_subset_length(tvb, offset, (int)frame_length);
+                dissect_http3_webtransport_stream(next_tvb, pinfo,tree, 0, frame_length);
             }
             break;
         }
@@ -520,6 +568,16 @@ proto_register_http3(void)
               FT_UINT64, BASE_DEC, NULL, 0x0,
               NULL, HFILL }
         },
+        { &hf_http3_settings_enable_webtransport,
+            { "Enable webtransport", "http3.settings.enable_webtransport",
+              FT_UINT64, BASE_DEC, NULL, 0x0,
+              NULL, HFILL }
+        },
+        { &hf_http3_settings_h3_datagram,
+            { "H3 Datagram", "http3.settings.h3_datagram",
+              FT_UINT64, BASE_DEC, NULL, 0x0,
+              NULL, HFILL }
+        },
 
         /* Priority Update */
         { &hf_http3_priority_update_element_id,
@@ -530,6 +588,18 @@ proto_register_http3(void)
         { &hf_http3_priority_update_field_value,
             { "Priority Update Field Value", "http3.priority_update_field_value",
               FT_STRING, BASE_NONE, NULL, 0x0,
+              NULL, HFILL }
+        },
+
+        /* Webtransport */
+        { &hf_http3_wt_stream_id,
+            { "Stream ID", "http3.webtransport_stream_id",
+              FT_BYTES, BASE_NONE, NULL, 0x0,
+              NULL, HFILL }
+        },
+        { &hf_http3_wt_stream_body,
+            { "Stream Body", "http3.webtransport_stream_body",
+              FT_BYTES, BASE_NONE, NULL, 0x0,
               NULL, HFILL }
         },
 
