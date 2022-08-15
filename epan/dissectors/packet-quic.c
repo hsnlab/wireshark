@@ -2573,6 +2573,18 @@ dissect_quic_frame_type(tvbuff_t *tvb, packet_info *pinfo, proto_tree *quic_tree
                 length = (guint32) tvb_reported_length_remaining(tvb, offset);
             }
             proto_tree_add_item(ft_tree, hf_quic_dg, tvb, offset, (guint32)length, ENC_NA);
+            if (tvb_get_guint8(tvb, offset) == 0x01 &&
+                tvb_get_guint8(tvb, offset+1) == 0x80) {
+                /* Assume it's a non-fragmented, embedded IP packet of a wsvpn connection */
+                dissector_handle_t ip_handle;
+                tvbuff_t   *next_tvb;
+                next_tvb = tvb_new_subset_remaining(tvb, offset+2);
+                ip_handle = find_dissector("ip");
+                if (ip_handle) {
+                    call_dissector(ip_handle, next_tvb, pinfo, ft_tree);
+                }
+            }
+
             offset += (guint32)length;
         }
         break;
