@@ -159,7 +159,7 @@ static int hf_http3_settings_enable_webtransport = -1;
 static int hf_http3_settings_h3_datagram = -1;
 static int hf_http3_priority_update_element_id = -1;
 static int hf_http3_priority_update_field_value = -1;
-static int hf_http3_wt_stream_id = -1;
+static int hf_http3_wt_session_id = -1;
 static int hf_http3_wt_stream_body = -1;
 
 
@@ -1463,8 +1463,13 @@ dissect_http3_priority_update(tvbuff_t* tvb, packet_info* pinfo _U_, proto_tree*
 static int
 dissect_http3_webtransport_stream(tvbuff_t* tvb, packet_info* pinfo _U_, proto_tree* http3_tree, guint offset, guint64 frame_length)
 {
-    guint64 session_body_len;
-    session_body_len = frame_length;
+    guint64 session_body_len, session_id;
+    int lenvar;
+
+    proto_tree_add_item_ret_varint(http3_tree, hf_http3_wt_session_id, tvb, offset, -1, ENC_VARINT_QUIC, &session_id, &lenvar);
+    col_append_fstr(pinfo->cinfo, COL_INFO, "(%" PRIu64 ")", session_id);
+    offset += lenvar;
+    session_body_len = frame_length - lenvar;
 
     proto_tree_add_item(http3_tree, hf_http3_wt_stream_body, tvb, offset, (int)session_body_len, ENC_ASCII);
     offset += (int)session_body_len;
@@ -2220,13 +2225,13 @@ proto_register_http3(void)
         },
 
         /* Webtransport */
-        { &hf_http3_wt_stream_id,
-            { "Stream ID", "http3.webtransport_stream_id",
-              FT_BYTES, BASE_NONE, NULL, 0x0,
+        { &hf_http3_wt_session_id,
+            { "Session ID", "http3.webtransport.session_id",
+              FT_UINT64, BASE_DEC, NULL, 0x0,
               NULL, HFILL }
         },
         { &hf_http3_wt_stream_body,
-            { "Stream Body", "http3.webtransport_stream_body",
+            { "Stream Body", "http3.webtransport.stream_body",
               FT_BYTES, BASE_NONE, NULL, 0x0,
               NULL, HFILL }
         },
