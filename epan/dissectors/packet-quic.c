@@ -2118,6 +2118,24 @@ void *quic_stream_get_proto_data(packet_info *pinfo, quic_stream_info *stream_in
     return stream->subdissector_private;
 }
 
+static gboolean
+try_get_quic_varint(tvbuff_t *tvb, int offset, guint64 *value, int *lenvar)
+{
+    if (tvb_reported_length_remaining(tvb, offset) == 0) {
+        return FALSE;
+    }
+    gint len = 1 << (tvb_get_guint8(tvb, offset) >> 6);
+    if (tvb_reported_length_remaining(tvb, offset) < len) {
+        return FALSE;
+    }
+    *lenvar = len;
+    if (value) {
+        gint n = (gint)tvb_get_varint(tvb, offset, -1, value, ENC_VARINT_QUIC);
+        DISSECTOR_ASSERT_CMPINT(n, ==, len);
+    }
+    return TRUE;
+}
+
 static int
 dissect_quic_frame_type(tvbuff_t *tvb, packet_info *pinfo, proto_tree *quic_tree, guint offset, quic_info_data_t *quic_info, const quic_packet_info_t *quic_packet, gboolean from_server)
 {
@@ -2573,12 +2591,18 @@ dissect_quic_frame_type(tvbuff_t *tvb, packet_info *pinfo, proto_tree *quic_tree
                 length = (guint32) tvb_reported_length_remaining(tvb, offset);
             }
             proto_tree_add_item(ft_tree, hf_quic_dg, tvb, offset, (guint32)length, ENC_NA);
-            if (tvb_get_guint8(tvb, offset) == 0x01 &&
-                tvb_get_guint8(tvb, offset+1) == 0x80) {
+
+            guint64 q_stream_id;
+            int lenvar;
+            if (try_get_quic_varint(tvb, offset, &q_stream_id, &lenvar)
+                && lenvar && (tvb_get_guint8(tvb, offset+lenvar) == 0x80)) {
                 /* Assume it's a non-fragmented, embedded IP packet of a wsvpn connection */
                 dissector_handle_t ip_handle;
                 tvbuff_t   *next_tvb;
-                next_tvb = tvb_new_subset_remaining(tvb, offset+2);
+                proto_tree_add_uint64(
+                    ft_tree, hf_quic_stream_stream_id, tvb, offset, lenvar,
+                    q_stream_id << 2);
+                next_tvb = tvb_new_subset_remaining(tvb, offset + lenvar + 1);
                 ip_handle = find_dissector("ip");
                 if (ip_handle) {
                     call_dissector(ip_handle, next_tvb, pinfo, ft_tree);
