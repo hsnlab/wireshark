@@ -232,7 +232,8 @@ static gint ett_quic_crypto_fragment = -1;
 static dissector_handle_t quic_handle;
 static dissector_handle_t tls13_handshake_handle;
 
-static dissector_table_t quic_proto_dissector_table;
+static dissector_table_t quic_proto_dissector_table;    /* for streams */
+static dissector_table_t quic_proto_dissector_dg_table; /* for datagrams */
 
 /* Fields for showing reassembly results for fragments of QUIC stream data. */
 static const fragment_items quic_stream_fragment_items = {
@@ -429,6 +430,7 @@ typedef struct quic_info_data {
     quic_cid_item_t server_cids;    /**< SCID of server from first Retry/Handshake. */
     quic_cid_t      client_dcid_initial;    /**< DCID from Initial Packet. */
     dissector_handle_t app_handle;  /**< Application protocol handle (NULL if unknown). */
+    dissector_handle_t app_dg_handle;  /**< Application protocol handle for datagrams (NULL if unknown). */
     wmem_map_t     *client_streams; /**< Map from Stream ID -> STREAM info (guint64 -> quic_stream_state), sent by the client. */
     wmem_map_t     *server_streams; /**< Map from Stream ID -> STREAM info (guint64 -> quic_stream_state), sent by the server. */
     wmem_list_t    *streams_list;   /**< Ordered list of QUIC Stream ID in this connection (both directions). Used by "Follow QUIC Stream" functionality */
@@ -1368,6 +1370,22 @@ process_quic_stream(tvbuff_t *tvb, int offset, packet_info *pinfo, proto_tree *t
     }
 }
 
+static void
+process_quic_datagram(tvbuff_t *tvb, int offset, packet_info *pinfo, proto_tree *tree,
+                      quic_info_data_t *quic_info, gboolean from_server)
+{
+    if (quic_info->app_dg_handle) {
+        quic_dg_info dg_info = {
+            .quic_info = quic_info,
+            .from_server = from_server,
+        };
+        tvbuff_t *next_tvb = tvb_new_subset_remaining(tvb, offset);
+        proto_tree *top_tree = proto_tree_get_parent_tree(tree);
+        top_tree = proto_tree_get_parent_tree(top_tree);
+        call_dissector_with_data(quic_info->app_dg_handle, next_tvb, pinfo, top_tree, (void*) &dg_info);
+    }
+}
+
 /**
  * Reassemble stream data within a STREAM frame.
  */
@@ -2118,24 +2136,6 @@ void *quic_stream_get_proto_data(packet_info *pinfo, quic_stream_info *stream_in
     return stream->subdissector_private;
 }
 
-static gboolean
-try_get_quic_varint(tvbuff_t *tvb, int offset, guint64 *value, int *lenvar)
-{
-    if (tvb_reported_length_remaining(tvb, offset) == 0) {
-        return FALSE;
-    }
-    gint len = 1 << (tvb_get_guint8(tvb, offset) >> 6);
-    if (tvb_reported_length_remaining(tvb, offset) < len) {
-        return FALSE;
-    }
-    *lenvar = len;
-    if (value) {
-        gint n = (gint)tvb_get_varint(tvb, offset, -1, value, ENC_VARINT_QUIC);
-        DISSECTOR_ASSERT_CMPINT(n, ==, len);
-    }
-    return TRUE;
-}
-
 static int
 dissect_quic_frame_type(tvbuff_t *tvb, packet_info *pinfo, proto_tree *quic_tree, guint offset, quic_info_data_t *quic_info, const quic_packet_info_t *quic_packet, gboolean from_server)
 {
@@ -2592,23 +2592,7 @@ dissect_quic_frame_type(tvbuff_t *tvb, packet_info *pinfo, proto_tree *quic_tree
             }
             proto_tree_add_item(ft_tree, hf_quic_dg, tvb, offset, (guint32)length, ENC_NA);
 
-            guint64 q_stream_id;
-            int lenvar;
-            if (try_get_quic_varint(tvb, offset, &q_stream_id, &lenvar)
-                && lenvar && (tvb_get_guint8(tvb, offset+lenvar) == 0x80)) {
-                /* Assume it's a non-fragmented, embedded IP packet of a wsvpn connection */
-                dissector_handle_t ip_handle;
-                tvbuff_t   *next_tvb;
-                proto_tree_add_uint64(
-                    ft_tree, hf_quic_stream_stream_id, tvb, offset, lenvar,
-                    q_stream_id << 2);
-                next_tvb = tvb_new_subset_remaining(tvb, offset + lenvar + 1);
-                ip_handle = find_dissector("ip");
-                if (ip_handle) {
-                    call_dissector(ip_handle, next_tvb, pinfo, ft_tree);
-                }
-            }
-
+            process_quic_datagram(tvb, offset, pinfo, ft_tree, quic_info, from_server);
             offset += (guint32)length;
         }
         break;
@@ -3285,6 +3269,7 @@ quic_get_1rtt_hp_cipher(packet_info *pinfo, quic_info_data_t *quic_info, gboolea
         const char *proto_name = tls_get_alpn(pinfo);
         if (proto_name) {
             quic_info->app_handle = dissector_get_string_handle(quic_proto_dissector_table, proto_name);
+            quic_info->app_dg_handle = dissector_get_string_handle(quic_proto_dissector_dg_table, proto_name);
             // If no specific handle is found, alias "h3-*" to "h3" and "doq-*" to "doq"
             if (!quic_info->app_handle) {
                 if (g_str_has_prefix(proto_name, "h3-")) {
@@ -5308,6 +5293,7 @@ proto_register_quic(void)
      * bytes, but in practice these do not exist yet.
      */
     quic_proto_dissector_table = register_dissector_table("quic.proto", "QUIC Protocol", proto_quic, FT_STRING, FALSE);
+    quic_proto_dissector_dg_table = register_dissector_table("quic.dg.proto", "QUIC Protocol (DG)", proto_quic, FT_STRING, FALSE);
 }
 
 void

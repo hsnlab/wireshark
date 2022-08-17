@@ -162,6 +162,8 @@ static int hf_http3_priority_update_field_value = -1;
 static int hf_http3_wt_session_id = -1;
 static int hf_http3_wt_stream_body = -1;
 
+static int hf_quic_stream_stream_id = -1;
+
 
 static expert_field ei_http3_header_decoding_failed = EI_INIT;
 static expert_field ei_http3_qpack_enc_update = EI_INIT;
@@ -765,6 +767,11 @@ register_static_headers(void) {
                 {"www-authenticate", "http3.headers.www_authenticate",
                  FT_STRING, BASE_NONE, NULL, 0x0,
                  "Authentication method that should be used to gain access to a resource", HFILL}
+        },
+        { &hf_quic_stream_stream_id,
+          { "Stream ID", "quic.stream.stream_id",
+            FT_UINT64, BASE_DEC, NULL, 0x0,
+            "ID of the client-initiated bidirectional stream that this datagram is associated with", HFILL }
         }
     };
     gchar* header_name;
@@ -1985,6 +1992,43 @@ dissect_http3(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
     return tvb_captured_length(tvb);
 }
 
+static int
+dissect_http3_dg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
+{
+    quic_dg_info *dg_info __attribute__((unused)) = (quic_dg_info *)data;
+    proto_item *ti;
+    proto_tree *http3_tree;
+    int offset = 0;
+    guint64 q_stream_id;
+    int lenvar;
+
+    if (!try_get_quic_varint(tvb, offset, &q_stream_id, &lenvar)) {
+        return 0;
+    }
+    ti = proto_tree_add_item(tree, proto_http3, tvb, 0, -1, ENC_NA);
+    proto_item_append_text(ti, ", Datagram");
+    http3_tree = proto_item_add_subtree(ti, ett_http3);
+
+    proto_tree_add_uint64(http3_tree, hf_quic_stream_stream_id,
+                          tvb, offset, lenvar, q_stream_id << 2);
+    offset += lenvar;
+
+    /* Assume it is a wsvpn connection */
+    if (tvb_get_guint8(tvb, offset) == 0x80) {
+        offset += 1;
+        /* It's a non-fragmented, embedded IP packet */
+        dissector_handle_t ip_handle;
+        tvbuff_t   *next_tvb;
+        next_tvb = tvb_new_subset_remaining(tvb, offset);
+        ip_handle = find_dissector("ip");
+        if (ip_handle) {
+            call_dissector(ip_handle, next_tvb, pinfo, tree);
+        }
+    }
+
+    return tvb_captured_length(tvb);
+}
+
 void
 proto_register_http3(void)
 {
@@ -2288,9 +2332,12 @@ void
 proto_reg_handoff_http3(void)
 {
     dissector_handle_t http3_handle;
+    dissector_handle_t http3_dg_handle;
 
     http3_handle = create_dissector_handle(dissect_http3, proto_http3);
+    http3_dg_handle = create_dissector_handle(dissect_http3_dg, proto_http3);
     dissector_add_string("quic.proto", "h3", http3_handle);
+    dissector_add_string("quic.dg.proto", "h3", http3_dg_handle);
 }
 
 /*

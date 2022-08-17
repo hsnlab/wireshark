@@ -31,6 +31,14 @@ typedef struct _quic_stream_info {
     gboolean    from_server;
 } quic_stream_info;
 
+/**
+ * Metadata for a dissecting a datagram frame.
+ */
+typedef struct _quic_dg_info {
+    struct quic_info_data *quic_info;    /**< Opaque data structure to find the QUIC session. */
+    gboolean    from_server;
+} quic_dg_info;
+
 /*
  * Although the QUIC SCID/DCID length field can store at most 255, v1 limits the
  * CID length to 20.
